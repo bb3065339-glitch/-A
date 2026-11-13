@@ -470,8 +470,8 @@ header .hr .ib{width:40px;height:40px}
 <div id="authGuest"><div class="auth-tabs"><button type="button" id="authLoginTab" class="on">تسجيل الدخول</button><button type="button" id="authSignupTab">إنشاء حساب</button></div>
 <form id="authForm" novalidate onsubmit="return false"><div id="authNameWrap" hidden><label for="authName">اسم المستخدم</label><input id="authName" autocomplete="nickname" maxlength="40" placeholder="اكتب اسمك"></div>
 <label for="authEmail">البريد الإلكتروني</label><input id="authEmail" type="email" autocomplete="email" inputmode="email" dir="ltr" placeholder="name@example.com" required>
-<label for="authPassword">كلمة المرور</label><div class="pw-wrap"><input id="authPassword" type="password" autocomplete="current-password" minlength="6" dir="ltr" placeholder="6 أحرف على الأقل" required><button type="button" class="pw-eye" id="authPwToggle" aria-label="إظهار كلمة المرور">👁</button></div>
-<div class="err" id="authError" role="alert"></div><button class="btn" id="authSubmit" type="submit" style="width:100%">دخول</button><button type="button" class="auth-forgot" id="authForgot">نسيت كلمة المرور؟</button></form>
+<label for="authPassword">كلمة المرور</label><div class="pw-wrap"><input id="authPassword" type="password" autocomplete="current-password" minlength="8" maxlength="72" dir="ltr" placeholder="8 أحرف على الأقل" required><button type="button" class="pw-eye" id="authPwToggle" aria-label="إظهار كلمة المرور">👁</button></div>
+<div class="err" id="authError" role="alert"></div><button class="btn" id="authSubmit" type="submit" style="width:100%">دخول</button></form>
 </div>
 <div id="authUser" hidden><div class="auth-welcome" style="text-align:center;padding:24px 12px 18px;font-size:1.2rem;font-weight:800;color:var(--red)">أهلاً وسهلاً بك، <span id="authDisplayName"></span> 👋</div><button class="btn" id="authLogout" type="button" style="width:100%">تسجيل الخروج</button></div>
 </div></div>
@@ -791,44 +791,40 @@ renderMenu();count();
 
 
 
+<script src="config.js"></script>
 <script>
-/* Account UI: works even if Firebase fails to load; Firebase is loaded on demand with a backup CDN. */
+/* نظام الحسابات: يتصل بالسيرفر المستقل (Node + Express + PostgreSQL). عنوان السيرفر في config.js */
 (function(){
   var $id=function(x){return document.getElementById(x)};
-  var firebaseConfig={apiKey:"AIzaSyC7B8_Z00RDGGcnpmdV6WzsT_GtNRPt3Cs",authDomain:"ak12-bd123.firebaseapp.com",projectId:"ak12-bd123",storageBucket:"ak12-bd123.firebasestorage.app",messagingSenderId:"792429063365",appId:"1:792429063365:web:957f0d7dae277fd91dd4ac",measurementId:"G-J55E6Y58L1"};
-  var SOURCES=[
-    ["https://www.gstatic.com/firebasejs/11.0.2/firebase-app.js","https://www.gstatic.com/firebasejs/11.0.2/firebase-auth.js"],
-    ["https://cdn.jsdelivr.net/npm/firebase@11.0.2/app/+esm","https://cdn.jsdelivr.net/npm/firebase@11.0.2/auth/+esm"]
-  ];
-  var fb=null,loading=null,mode='login';
+  var CFG=window.APP_CONFIG||{};
+  var API=(typeof CFG.API_BASE==='string'?CFG.API_BASE:null);
+  if(API!==null)API=API.replace(/\/+$/,'');
+  var mode='login';
   var errBox=$id('authError');
   function say(t,ok){errBox.className=ok?'err ok':'err';errBox.textContent=t||''}
-  function load(){
-    if(fb)return Promise.resolve(fb);
-    if(loading)return loading;
-    loading=(async function(){
-      var last;
-      for(var k=0;k<SOURCES.length;k++){
-        try{
-          var m=await Promise.all([import(SOURCES[k][0]),import(SOURCES[k][1])]);
-          var A=m[1],auth=A.getAuth(m[0].initializeApp(firebaseConfig));
-          var persist=A.setPersistence(auth,A.browserLocalPersistence).catch(function(){});
-          fb={A:A,auth:auth,persist:persist};
-          A.onAuthStateChanged(auth,function(u){u?showUser(u):showGuest()});
-          return fb;
-        }catch(e){last=e;console.error(e)}
-      }
-      loading=null;throw last||new Error('load-failed');
-    })();
-    return loading;
+
+  var NETFAIL='تعذر الاتصال بالسيرفر. تأكد من الإنترنت وحاول مرة أخرى (قد يحتاج السيرفر نصف دقيقة ليستيقظ).';
+  var NOCFG='عنوان السيرفر غير مضبوط في الموقع (config.js).';
+
+  /* طلب إلى الـ API مع إرسال الكوكيز. يرجع {status,data} أو يرمي خطأ شبكة */
+  async function api(method,path,body){
+    if(API===null)throw new Error('nocfg');
+    var ctl=new AbortController(),tm=setTimeout(function(){ctl.abort()},70000);
+    try{
+      var res=await fetch(API+path,{
+        method:method,credentials:'include',signal:ctl.signal,
+        headers:body?{'Content-Type':'application/json'}:{},
+        body:body?JSON.stringify(body):undefined
+      });
+      var data={};try{data=await res.json()}catch(e){}
+      return {status:res.status,data:data};
+    }finally{clearTimeout(tm)}
   }
-  /* start loading right away so the first tap is instant */
-  load().catch(function(){});
+  function failMsg(e){return(e&&e.message==='nocfg')?NOCFG:NETFAIL}
 
   function setMode(m){
     mode=m;
     $id('authNameWrap').hidden=m!=='signup';
-    $id('authForgot').hidden=m==='signup';
     $id('authPassword').autocomplete=m==='signup'?'new-password':'current-password';
     $id('authLoginTab').classList.toggle('on',m==='login');
     $id('authSignupTab').classList.toggle('on',m==='signup');
@@ -845,29 +841,6 @@ renderMenu();count();
   });
   document.querySelectorAll('#authForm input').forEach(function(i){i.addEventListener('focus',function(){setTimeout(function(){i.scrollIntoView({block:'center',behavior:'smooth'})},300)})});
 
-  var MSG={
-    'auth/email-already-in-use':'البريد الإلكتروني مستخدم بالفعل. جرّب تسجيل الدخول.',
-    'auth/invalid-email':'البريد الإلكتروني غير صحيح.',
-    'auth/missing-email':'اكتب البريد الإلكتروني.',
-    'auth/missing-password':'اكتب كلمة المرور.',
-    'auth/weak-password':'كلمة المرور ضعيفة؛ استخدم 6 أحرف على الأقل.',
-    'auth/invalid-credential':'البريد الإلكتروني أو كلمة المرور غير صحيحة.',
-    'auth/invalid-login-credentials':'البريد الإلكتروني أو كلمة المرور غير صحيحة.',
-    'auth/user-not-found':'لا يوجد حساب بهذا البريد الإلكتروني.',
-    'auth/wrong-password':'كلمة المرور غير صحيحة.',
-    'auth/user-disabled':'هذا الحساب موقوف. تواصل مع المطعم.',
-    'auth/too-many-requests':'محاولات كثيرة. حاول مرة أخرى لاحقًا.',
-    'auth/network-request-failed':'تعذر الاتصال بالإنترنت. حاول مرة أخرى.',
-    'auth/operation-not-allowed':'تسجيل الدخول بالبريد وكلمة المرور غير مفعّل في Firebase (Authentication ← Sign-in method ← Email/Password).',
-    'auth/operation-not-supported-in-this-environment':'افتح الموقع من رابط الاستضافة (https) وليس من الملف مباشرة.',
-    'auth/unauthorized-domain':'هذا الدومين غير مضاف في Firebase (Authentication ← Settings ← Authorized domains).',
-    'auth/invalid-api-key':'مفتاح Firebase غير صحيح.',
-    'auth/configuration-not-found':'خدمة Authentication غير مفعّلة في مشروع Firebase.',
-    'auth/requests-from-referer-blocked':'مفتاح Firebase مقيّد ولا يسمح بهذا الدومين.',
-    'auth/internal-error':'حدث خطأ داخلي. حاول مرة أخرى بعد قليل.'
-  };
-  function errMsg(e){return MSG[e&&e.code]||('تعذر إكمال العملية. كود الخطأ: '+((e&&(e.code||e.message))||'غير معروف'))}
-  var LOADFAIL='تعذر تحميل خدمة تسجيل الدخول. تأكد من اتصال الإنترنت (وأن الموقع غير محجوب) ثم حدّث الصفحة.';
   function validEmail(v){return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(v)}
 
   $id('authForm').addEventListener('submit',async function(ev){
@@ -878,39 +851,21 @@ renderMenu();count();
     if(!email){say('اكتب البريد الإلكتروني.');return}
     if(!validEmail(email)){say('البريد الإلكتروني غير صحيح.');return}
     if(!password){say('اكتب كلمة المرور.');return}
-    if(mode==='signup'&&password.length<6){say('كلمة المرور ضعيفة؛ استخدم 6 أحرف على الأقل.');return}
+    if(mode==='signup'&&password.length<8){say('كلمة المرور ضعيفة؛ استخدم 8 أحرف على الأقل.');return}
     var old=btn.textContent;btn.disabled=true;btn.textContent='جارٍ التنفيذ…';
     try{
-      var f;try{f=await load()}catch(e){say(LOADFAIL);return}
-      await f.persist;
-      if(mode==='signup'){
-        var c=await f.A.createUserWithEmailAndPassword(f.auth,email,password);
-        try{await f.A.updateProfile(c.user,{displayName:name})}catch(e){console.error(e)}
-        showUser(c.user,name);
-      }else{
-        var c2=await f.A.signInWithEmailAndPassword(f.auth,email,password);
-        showUser(c2.user);
-      }
-      $id('authPassword').value='';
-    }catch(e){console.error(e);say(errMsg(e))}
+      var r=mode==='signup'
+        ?await api('POST','/api/auth/signup',{name:name,email:email,password:password})
+        :await api('POST','/api/auth/login',{email:email,password:password});
+      if(r.data&&r.data.user){showUser(r.data.user);$id('authPassword').value=''}
+      else say((r.data&&r.data.error)||'تعذر إكمال العملية. حاول مرة أخرى.');
+    }catch(e){console.error(e);say(failMsg(e))}
     finally{btn.disabled=false;btn.textContent=old}
   });
 
-  $id('authForgot').addEventListener('click',async function(){
-    var email=$id('authEmail').value.trim();
-    if(!validEmail(email)){say('اكتب بريدك الإلكتروني أولًا ثم اضغط «نسيت كلمة المرور؟».');return}
-    var b=$id('authForgot');b.disabled=true;
-    try{
-      var f;try{f=await load()}catch(e){say(LOADFAIL);return}
-      await f.A.sendPasswordResetEmail(f.auth,email);
-      say('تم إرسال رابط إعادة تعيين كلمة المرور إلى بريدك (راجع الرسائل غير المرغوبة أيضًا).',true);
-    }catch(e){console.error(e);say(errMsg(e))}
-    finally{b.disabled=false}
-  });
-
-  function showUser(u,fallback){
+  function showUser(u){
     $id('authGuest').hidden=true;$id('authUser').hidden=false;
-    $id('authDisplayName').textContent=u.displayName||fallback||(u.email?u.email.split('@')[0]:'عضو');
+    $id('authDisplayName').textContent=(u&&u.name)||'عضو';
     $id('accountBtn').classList.add('in');$id('accountBtn').setAttribute('aria-label','الحساب — مسجّل الدخول');
     say('');
   }
@@ -918,14 +873,25 @@ renderMenu();count();
     $id('authGuest').hidden=false;$id('authUser').hidden=true;$id('authDisplayName').textContent='';
     $id('accountBtn').classList.remove('in');$id('accountBtn').setAttribute('aria-label','الحساب');
   }
+
   $id('authLogout').addEventListener('click',async function(){
     var b=$id('authLogout');b.disabled=true;
     try{
-      var f=await load();await f.A.signOut(f.auth);
-      setMode('login');$id('authPassword').value='';$id('authEmail').value='';$id('authName').value='';
-    }catch(e){say(errMsg(e))}
+      var r=await api('POST','/api/auth/logout');
+      if(r.status>=400)throw new Error('logout');
+      showGuest();setMode('login');
+      $id('authPassword').value='';$id('authEmail').value='';$id('authName').value='';
+    }catch(e){console.error(e);alert(failMsg(e))}
     finally{b.disabled=false}
   });
+
+  /* استعادة الجلسة بعد تحديث الصفحة أو إعادة فتح المتصفح (الكوكي HttpOnly محفوظ لدى المتصفح) */
+  (async function restore(){
+    try{
+      var r=await api('GET','/api/auth/me');
+      if(r.data&&r.data.user)showUser(r.data.user);else showGuest();
+    }catch(e){console.error(e)}
+  })();
 })();
 </script>
 
